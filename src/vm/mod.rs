@@ -8,7 +8,7 @@ mod jitmem;
 use self::jitmem::JitMemory;
 use std::collections::HashMap;
 
-const STACK_ALIGNMENT_BLOCKS: usize = 10;
+const STACK_ALIGNMENT_BLOCKS: usize = 16; // 128 bytes red zone
 
 // Possible optimizations:
 // * multiple + and - as add/sub byte [rsi], X
