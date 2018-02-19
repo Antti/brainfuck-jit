@@ -1,11 +1,14 @@
 extern "C" {
     fn getchar() -> i32;
+    fn putchar_unlocked(ch: i32) -> i32;
     fn putchar(ch: i32) -> i32;
 }
 
 mod jitmem;
 use self::jitmem::JitMemory;
 use std::collections::HashMap;
+
+const STACK_ALIGNMENT_BLOCKS: usize = 10;
 
 // Possible optimizations:
 // * multiple + and - as add/sub byte [rsi], X
@@ -31,14 +34,31 @@ lazy_static! {
             0x80, 0x3e, 0x00, // cmp byte [rsi], al
             0x0f, 0x85, 0, 0, 0, 0 // jne addr (rel, 32 bit)
         ]);
+        // Windows
+        // m.insert('.', &[
+        //     0x0f, 0xb6, 0x0e, // movzx ecx, byte [rsi]
+        //     0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, putchar
+        //     0xff, 0xd0, // call rax
+        // ]);
+        // m.insert(',', &[
+        //     0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, getchar
+        //     0xff, 0xd0, // call rax
+        //     0x88, 0x06, // mov byte [rsi], al
+        // ]);
+
+        // Linux & Mac
         m.insert('.', &[
-            0x0f, 0xb6, 0x0e, // movzx ecx, byte [rsi]
+            0x48, 0x0f, 0xb6, 0x3e, // movzx rdi, byte [rsi]
             0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, putchar
+            0x56, // push rsi
             0xff, 0xd0, // call rax
-        ]); 
+            0x5e, //pop rsi
+        ]);
         m.insert(',', &[
             0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, getchar
+            0x56, // push rsi
             0xff, 0xd0, // call rax
+            0x5e, //pop rsi
             0x88, 0x06, // mov byte [rsi], al
         ]);
         m
@@ -117,14 +137,13 @@ impl BfJitVM {
         }
 
         // note: this var occurs also in compile_helper!
-        let stack_alignment_blocks = 5;
         // prolog
-        required_code_mem += INSTR_TO_BIN_CODE[&'p'].len() * stack_alignment_blocks;
+        required_code_mem += INSTR_TO_BIN_CODE[&'p'].len() * STACK_ALIGNMENT_BLOCKS;
         required_code_mem += INSTR_TO_BIN_CODE[&'q'].len();
         // epilog
-        required_code_mem += INSTR_TO_BIN_CODE[&'P'].len() * stack_alignment_blocks;
+        required_code_mem += INSTR_TO_BIN_CODE[&'P'].len() * STACK_ALIGNMENT_BLOCKS;
         required_code_mem += INSTR_TO_BIN_CODE[&'r'].len();
-        let vm_code_buffer_size = self.code_mem.size();
+        let vm_code_buffer_size = self.code_mem.len();
         if required_code_mem > vm_code_buffer_size {
             println!("JitCompiler: Error: code requires {} bytes, but VM has a buffer of {} \
                       bytes.",
@@ -142,9 +161,8 @@ impl BfJitVM {
     fn compile_helper(&mut self, code: &[u8]) {
         let mut ip = 0;
         // for debugging:
-        //self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&'d']);
-        let stack_alignment_blocks = 5;
-        for _ in 0..stack_alignment_blocks {
+        // self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&'d']);
+        for _ in 0..STACK_ALIGNMENT_BLOCKS {
             // space on the stack for calling putchar/getchar + preserving rsi
             self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&'p']);
         }
@@ -153,7 +171,7 @@ impl BfJitVM {
         self.code_mem.patch_addr_u64(ip - addr_size, self.data_mem.as_ptr() as u64);
         let (mut ip, chars_processed) = self.compile_loop_body(code, ip);
         assert_eq!(chars_processed, code.len());
-        for _ in 0..stack_alignment_blocks {
+        for _ in 0..STACK_ALIGNMENT_BLOCKS {
             self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&'P']);
         }
         self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&'r']);
@@ -173,12 +191,12 @@ impl BfJitVM {
                 }
                 '.' => {
                     self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&ch]);
-                    let putchar_addr_offset = 10;
-                    self.code_mem.patch_addr_u64(ip - putchar_addr_offset, putchar as u64);
+                    let putchar_addr_offset = 12; // 10 on windows. Extra 2 instructions for push rsi, pop rsi
+                    self.code_mem.patch_addr_u64(ip - putchar_addr_offset, putchar_unlocked as u64);
                 }
                 ',' => {
                     self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&ch]);
-                    let getchar_addr_offset = 12;
+                    let getchar_addr_offset = 14; // 12 on windows
                     self.code_mem.patch_addr_u64(ip - getchar_addr_offset, getchar as u64);
                 }
                 '[' => {
