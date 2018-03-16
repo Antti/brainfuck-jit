@@ -1,7 +1,6 @@
 extern "C" {
     fn getchar() -> i32;
     fn putchar_unlocked(ch: i32) -> i32;
-    fn putchar(ch: i32) -> i32;
 }
 
 mod jitmem;
@@ -35,32 +34,36 @@ lazy_static! {
             0x0f, 0x85, 0, 0, 0, 0 // jne addr (rel, 32 bit)
         ]);
         // Windows
-        // m.insert('.', &[
-        //     0x0f, 0xb6, 0x0e, // movzx ecx, byte [rsi]
-        //     0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, putchar
-        //     0xff, 0xd0, // call rax
-        // ]);
-        // m.insert(',', &[
-        //     0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, getchar
-        //     0xff, 0xd0, // call rax
-        //     0x88, 0x06, // mov byte [rsi], al
-        // ]);
+        if cfg!(windows) {
+            m.insert('.', &[
+                0x0f, 0xb6, 0x0e, // movzx ecx, byte [rsi]
+                0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, putchar_unlocked
+                0xff, 0xd0, // call rax
+            ]);
+            m.insert(',', &[
+                0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, getchar
+                0xff, 0xd0, // call rax
+                0x88, 0x06, // mov byte [rsi], al
+            ]);
+        }
 
-        // Linux & Mac
-        m.insert('.', &[
-            0x48, 0x0f, 0xb6, 0x3e, // movzx rdi, byte [rsi]
-            0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, putchar
-            0x56, // push rsi
-            0xff, 0xd0, // call rax
-            0x5e, //pop rsi
-        ]);
-        m.insert(',', &[
-            0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, getchar
-            0x56, // push rsi
-            0xff, 0xd0, // call rax
-            0x5e, //pop rsi
-            0x88, 0x06, // mov byte [rsi], al
-        ]);
+        if cfg!(unix) {
+            // Linux & Mac
+            m.insert('.', &[
+                0x48, 0x0f, 0xb6, 0x3e, // movzx rdi, byte [rsi]
+                0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, putchar_unlocked
+                0x56, // push rsi
+                0xff, 0xd0, // call rax
+                0x5e, //pop rsi
+            ]);
+            m.insert(',', &[
+                0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, getchar
+                0x56, // push rsi
+                0xff, 0xd0, // call rax
+                0x5e, //pop rsi
+                0x88, 0x06, // mov byte [rsi], al
+            ]);
+        }
         m
     };
 }
@@ -98,9 +101,9 @@ impl BfJitVM {
         }
 
         let jit_function = self.code_mem.as_function();
-        println!("JitVM: Running code from addr 0x{:x}", jit_function as u64);
-        println!("JitVM: VM memory at 0x{:x}", self.data_mem.as_ptr() as u64);
-        println!("-------------------");
+        eprintln!("JitVM: Running code from addr 0x{:x}", jit_function as u64);
+        eprintln!("JitVM: VM memory at 0x{:x}", self.data_mem.as_ptr() as u64);
+        eprintln!("-------------------");
         jit_function();
     }
 
@@ -121,7 +124,7 @@ impl BfJitVM {
                 }
                 ']' => {
                     if opened_loops == 0 {
-                        println!("JitCompiler: Error: found ']' without corresponding '['.");
+                        eprintln!("JitCompiler: Error: found ']' without corresponding '['.");
                         return false;
                     }
                     opened_loops -= 1;
@@ -132,7 +135,7 @@ impl BfJitVM {
         }
 
         if opened_loops > 0 {
-            println!("JitCompiler: Error: too many ']'.");
+            eprintln!("JitCompiler: Error: too many ']'.");
             return false;
         }
 
@@ -145,16 +148,16 @@ impl BfJitVM {
         required_code_mem += INSTR_TO_BIN_CODE[&'r'].len();
         let vm_code_buffer_size = self.code_mem.len();
         if required_code_mem > vm_code_buffer_size {
-            println!("JitCompiler: Error: code requires {} bytes, but VM has a buffer of {} \
+            eprintln!("JitCompiler: Error: code requires {} bytes, but VM has a buffer of {} \
                       bytes.",
                      required_code_mem,
                      vm_code_buffer_size);
             return false;
         }
 
-        println!("JitCompiler: Warning: did not validate if VM memory buffer is big enough and \
+        eprintln!("JitCompiler: Warning: did not validate if VM memory buffer is big enough and \
                   if program accesses memory beyond its boundaries.");
-        println!("JitCompiler: Warning: assuming that getchar and putchar always succeeds.");
+        eprintln!("JitCompiler: Warning: assuming that getchar and putchar always succeeds.");
         true
     }
 
@@ -175,8 +178,8 @@ impl BfJitVM {
             self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&'P']);
         }
         self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&'r']);
-        println!("JitCompiler: compilation resulted in {} bytes.", ip);
-        println!("-------------------");
+        eprintln!("JitCompiler: compilation resulted in {} bytes.", ip);
+        eprintln!("-------------------");
     }
 
     // returns (new ip, code chars processed)
@@ -191,12 +194,24 @@ impl BfJitVM {
                 }
                 '.' => {
                     self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&ch]);
-                    let putchar_addr_offset = 12; // 10 on windows. Extra 2 instructions for push rsi, pop rsi
+                    let putchar_addr_offset = if cfg!(unix) {
+                        12
+                    } else if cfg!(windows) {
+                        10
+                    } else {
+                        panic!("Unsupported platform");
+                    };
                     self.code_mem.patch_addr_u64(ip - putchar_addr_offset, putchar_unlocked as u64);
                 }
                 ',' => {
                     self.code_mem.write_at(&mut ip, INSTR_TO_BIN_CODE[&ch]);
-                    let getchar_addr_offset = 14; // 12 on windows
+                    let getchar_addr_offset = if cfg!(unix) {
+                        14
+                    } else if cfg!(windows) {
+                        12
+                    } else {
+                        panic!("Unsupported platform");
+                    };
                     self.code_mem.patch_addr_u64(ip - getchar_addr_offset, getchar as u64);
                 }
                 '[' => {
