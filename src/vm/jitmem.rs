@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 use std::mem;
-use std::heap::{Alloc, Layout, Heap};
+use std::alloc::{Alloc, Layout, Global};
 
 #[cfg(target_os = "windows")]
 extern "C" {
@@ -29,7 +29,7 @@ pub struct JitMemory {
 impl JitMemory {
     pub fn alloc(len: usize) -> Option<Self> {
         let layout = Layout::from_size_align(len, 4096).unwrap(); // TODO: use getpagesize
-        let mem = unsafe { Alloc::alloc(&mut Heap::default(), layout).unwrap() };
+        let mem = unsafe { Alloc::alloc(&mut Global::default(), layout).unwrap().as_ptr() };
         let res = unsafe { set_read_write_exec(mem, len) };
 
         if res {
