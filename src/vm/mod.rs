@@ -1,4 +1,4 @@
-extern "C" {
+unsafe extern "C" {
     fn getchar() -> i32;
     fn putchar_unlocked(ch: i32) -> i32;
 }

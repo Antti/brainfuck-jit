@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 use std::mem;
-use std::alloc::{Alloc, Layout, Global};
+use std::alloc::{self, Layout};
 
 #[cfg(target_os = "windows")]
 extern "C" {
@@ -15,11 +15,11 @@ unsafe fn set_read_write_exec(addr: *mut u8, len: usize) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-unsafe fn set_read_write_exec(addr: *mut u8, len: usize) -> bool {
+unsafe fn set_read_write_exec(addr: *mut u8, len: usize) -> bool { unsafe {
     use libc;
     let prot = libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC;
     libc::mprotect(addr as *mut libc::c_void, len, prot) == 0
-}
+}}
 
 pub struct JitMemory {
     mem: *mut u8,
@@ -29,7 +29,7 @@ pub struct JitMemory {
 impl JitMemory {
     pub fn alloc(len: usize) -> Option<Self> {
         let layout = Layout::from_size_align(len, 4096).unwrap(); // TODO: use getpagesize
-        let mem = unsafe { Alloc::alloc(&mut Global::default(), layout).unwrap().as_ptr() };
+        let mem = unsafe { alloc::alloc(layout) };
         let res = unsafe { set_read_write_exec(mem, len) };
 
         if res {

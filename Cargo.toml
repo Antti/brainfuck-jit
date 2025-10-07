@@ -1,8 +1,9 @@
 [package]
 name = "bf-jit"
 version = "0.1.0"
-authors = ["mrowqa <artur.jamro@gmail.com>"]
+authors = ["mrowqa <artur.jamro@gmail.com>", "Andrii Dmytrenko <refresh.xss@gmail.com>"]
+edition = "2024"
 
 [dependencies]
-lazy_static = "1.0"
-libc = "*"
+lazy_static = "1.5"
+libc = "0.2"
