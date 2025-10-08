@@ -5,5 +5,5 @@ authors = ["mrowqa <artur.jamro@gmail.com>", "Andrii Dmytrenko <refresh.xss@gmai
 edition = "2024"
 
 [dependencies]
-lazy_static = "1.5"
 libc = "0.2"
+thiserror = "2.0.17"
